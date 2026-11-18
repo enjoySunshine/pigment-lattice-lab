@@ -1,5 +1,6 @@
 import { FileLoader, Loader, LoadingManager } from "three";
 import { LookupTexture } from "../textures/lut/LookupTexture.js";
+import { skipToToken, writeNumber } from "./lut-text-utils.js";
 
 /**
  * A 3D LUT loader that supports the .3dl file format.
@@ -84,6 +85,10 @@ export class LUT3dlLoader extends Loader {
 	/**
 	 * Parses the given data.
 	 *
+	 * The grid line and the whitespace-separated data triplets are scanned with a flat
+	 * pointer. Numeric tokens are parsed directly into the LUT data to avoid intermediate
+	 * string allocations.
+	 *
 	 * @param {String} input - The LUT data.
 	 * @return {LookupTexture} The lookup texture.
 	 * @throws {Error} Fails if the data is invalid.
@@ -91,19 +96,80 @@ export class LUT3dlLoader extends Loader {
 
 	parse(input) {
 
-		const regExpGridInfo = /^[\d ]+$/m;
-		const regExpDataPoints = /^([\d.e+-]+) +([\d.e+-]+) +([\d.e+-]+) *$/gm;
+		const length = input.length;
+		let p = 0;
 
-		// The first line describes the positions of values on the LUT grid.
-		let result = regExpGridInfo.exec(input);
+		// Skip comment lines.
+		while(p < length && input.charCodeAt(p) === 35 /* # */) {
 
-		if(result === null) {
+			while(p < length && input.charCodeAt(p) !== 10) {
+
+				++p;
+
+			}
+
+			++p;
+
+		}
+
+		// The first non-comment line describes the positions of values on the LUT grid.
+		while(p < length && input.charCodeAt(p) <= 32) {
+
+			if(input.charCodeAt(p) === 10 || input.charCodeAt(p) === 13) {
+
+				break;
+
+			}
+
+			++p;
+
+		}
+
+		const gridLines = [];
+
+		while(p < length) {
+
+			const c = input.charCodeAt(p);
+
+			if(c === 10 || c === 13) {
+
+				break;
+
+			}
+
+			let value = 0;
+
+			while(p < length) {
+
+				const d = input.charCodeAt(p);
+
+				if(d < 48 || d > 57) {
+
+					break;
+
+				}
+
+				value = value * 10 + (d - 48);
+				++p;
+
+			}
+
+			gridLines.push(value);
+
+			while(p < length && input.charCodeAt(p) === 32) {
+
+				++p;
+
+			}
+
+		}
+
+		if(gridLines.length === 0) {
 
 			throw new Error("Missing grid information");
 
 		}
 
-		const gridLines = result[0].trim().split(/\s+/g).map((n) => Number(n));
 		const gridStep = gridLines[1] - gridLines[0];
 		const size = gridLines.length;
 		const sizeSq = size ** 2;
@@ -119,20 +185,49 @@ export class LUT3dlLoader extends Loader {
 		}
 
 		const data = new Float32Array(size ** 3 * 4);
+		const raw = new Float32Array(3);
 		let maxValue = 0.0;
 		let index = 0;
 
-		while((result = regExpDataPoints.exec(input)) !== null) {
+		while(p < length) {
 
-			const r = Number(result[1]);
-			const g = Number(result[2]);
-			const b = Number(result[3]);
+			p = skipToToken(input, p, length);
 
-			maxValue = Math.max(maxValue, r, g, b);
+			if(p >= length) {
+
+				break;
+
+			}
+
+			if(input.charCodeAt(p) === 35) {
+
+				while(p < length && input.charCodeAt(p) !== 10) {
+
+					++p;
+
+				}
+
+				continue;
+
+			}
+
+			p = writeNumber(input, p, length, raw, 0);
+			p = skipToToken(input, p, length);
+			p = writeNumber(input, p, length, raw, 1);
+			p = skipToToken(input, p, length);
+			p = writeNumber(input, p, length, raw, 2);
+
+			const r = raw[0];
+			const g = raw[1];
+			const b = raw[2];
+
+			if(r > maxValue) { maxValue = r; }
+			if(g > maxValue) { maxValue = g; }
+			if(b > maxValue) { maxValue = b; }
 
 			const bLayer = index % size;
 			const gLayer = Math.floor(index / size) % size;
-			const rLayer = Math.floor(index / (sizeSq)) % size;
+			const rLayer = Math.floor(index / sizeSq) % size;
 
 			// b grows first, then g, then r.
 			const d4 = (bLayer * sizeSq + gLayer * size + rLayer) * 4;

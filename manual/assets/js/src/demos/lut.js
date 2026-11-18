@@ -231,8 +231,19 @@ window.addEventListener("load", () => load().then((assets) => {
 
 			const lut = (original instanceof LookupTexture) ? original : LookupTexture.from(original);
 			console.time("Tetrahedral Upscaling");
-			promise = lut.scaleUp(params["target size"], false);
 			document.body.classList.add("progress");
+
+			try {
+
+				promise = Promise.resolve(lut.scaleUpSync(params["target size"]));
+
+			} catch(error) {
+
+				document.body.classList.remove("progress");
+				console.error(error);
+				return;
+
+			}
 
 		} else {
 

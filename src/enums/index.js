@@ -7,7 +7,6 @@ export * from "./EffectAttribute.js";
 export * from "./EffectShaderSection.js";
 export * from "./GlitchMode.js";
 export * from "./KernelSize.js";
-export * from "./LUTOperation.js";
 export * from "./MaskFunction.js";
 export * from "./PredicationMode.js";
 export * from "./SMAAPreset.js";

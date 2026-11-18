@@ -1,5 +1,6 @@
 import { FileLoader, Loader, LoadingManager, Vector3 } from "three";
 import { LookupTexture } from "../textures/lut/LookupTexture.js";
+import { isNumberStart, skipToToken, writeNumber } from "./lut-text-utils.js";
 
 /**
  * A 3D LUT loader that supports the .cube file format.
@@ -83,6 +84,10 @@ export class LUTCubeLoader extends Loader {
 	/**
 	 * Parses the given data.
 	 *
+	 * The short keyword header is scanned line by line while the data section is read with
+	 * a single flat pointer scan. Numeric tokens are parsed directly into the LUT data to
+	 * avoid intermediate string allocations.
+	 *
 	 * @param {String} input - The LUT data.
 	 * @return {LookupTexture} The lookup texture.
 	 * @throws {Error} Fails if the data is invalid.
@@ -90,42 +95,104 @@ export class LUTCubeLoader extends Loader {
 
 	parse(input) {
 
-		const regExpTitle = /TITLE +"([^"]*)"/;
-		const regExpSize = /LUT_3D_SIZE +(\d+)/;
-		const regExpDomainMin = /DOMAIN_MIN +([\d.]+) +([\d.]+) +([\d.]+)/;
-		const regExpDomainMax = /DOMAIN_MAX +([\d.]+) +([\d.]+) +([\d.]+)/;
-		const regExpDataPoints = /^([\d.e+-]+) +([\d.e+-]+) +([\d.e+-]+) *$/gm;
-
-		let result = regExpTitle.exec(input);
-		const title = (result !== null) ? result[1] : null;
-
-		result = regExpSize.exec(input);
-
-		if(result === null) {
-
-			throw new Error("Missing LUT_3D_SIZE information");
-
-		}
-
-		const size = Number(result[1]);
-		const data = new Float32Array(size ** 3 * 4);
+		let title = null;
+		let size = 0;
 
 		const domainMin = new Vector3(0.0, 0.0, 0.0);
 		const domainMax = new Vector3(1.0, 1.0, 1.0);
 
-		result = regExpDomainMin.exec(input);
+		const length = input.length;
+		const domainTmp = new Float32Array(3);
+		let lineStart = 0;
 
-		if(result !== null) {
+		// Header scan: keyword lines only, stops at the first data line.
+		while(lineStart < length) {
 
-			domainMin.set(Number(result[1]), Number(result[2]), Number(result[3]));
+			let lineEnd = input.indexOf("\n", lineStart);
+
+			if(lineEnd === -1) {
+
+				lineEnd = length;
+
+			}
+
+			if(lineEnd > lineStart && input.charCodeAt(lineEnd - 1) === 13 /* \r */) {
+
+				--lineEnd;
+
+			}
+
+			const ch = input.charCodeAt(lineStart);
+
+			if(ch === 84 /* T */) {
+
+				const q1 = input.indexOf("\"", lineStart);
+				const q2 = input.indexOf("\"", q1 + 1);
+				title = input.slice(q1 + 1, q2);
+
+			} else if(ch === 76 /* L */) {
+
+				let e = lineEnd;
+
+				while(e > lineStart && input.charCodeAt(e - 1) <= 32) {
+
+					--e;
+
+				}
+
+				let s = e;
+
+				while(s > lineStart && input.charCodeAt(s - 1) >= 48) {
+
+					--s;
+
+				}
+
+				let n = 0;
+
+				for(let k = s; k < e; ++k) {
+
+					n = n * 10 + (input.charCodeAt(k) - 48);
+
+				}
+
+				size = n;
+
+			} else if(ch === 68 /* D */) {
+
+				const target = (input.charCodeAt(lineStart + 8) === 65 /* A */) ?
+					domainMax : domainMin;
+
+				let p = lineStart;
+
+				// Skip the DOMAIN_MIN/MAX keyword.
+				while(p < lineEnd && input.charCodeAt(p) > 32) {
+
+					++p;
+
+				}
+
+				p = skipToToken(input, p, lineEnd);
+				p = writeNumber(input, p, lineEnd, domainTmp, 0);
+				p = skipToToken(input, p, lineEnd);
+				p = writeNumber(input, p, lineEnd, domainTmp, 1);
+				p = skipToToken(input, p, lineEnd);
+				writeNumber(input, p, lineEnd, domainTmp, 2);
+				target.set(domainTmp[0], domainTmp[1], domainTmp[2]);
+
+			} else if(size > 0 && isNumberStart(ch)) {
+
+				break;
+
+			}
+
+			lineStart = lineEnd + 1;
 
 		}
 
-		result = regExpDomainMax.exec(input);
+		if(size === 0) {
 
-		if(result !== null) {
-
-			domainMax.set(Number(result[1]), Number(result[2]), Number(result[3]));
+			throw new Error("Missing LUT_3D_SIZE information");
 
 		}
 
@@ -138,14 +205,50 @@ export class LUTCubeLoader extends Loader {
 
 		}
 
+		const data = new Float32Array(size ** 3 * 4);
+		let p = lineStart;
 		let i = 0;
 
-		while((result = regExpDataPoints.exec(input)) !== null) {
+		// Flat data scan over whitespace-separated triplets.
+		while(p < length) {
 
-			data[i++] = Number(result[1]);
-			data[i++] = Number(result[2]);
-			data[i++] = Number(result[3]);
-			data[i++] = 1.0;
+			p = skipToToken(input, p, length);
+
+			if(p >= length) {
+
+				break;
+
+			}
+
+			const ch = input.charCodeAt(p);
+
+			if(ch === 35 /* # */) {
+
+				while(p < length && input.charCodeAt(p) !== 10) {
+
+					++p;
+
+				}
+
+			} else if(isNumberStart(ch)) {
+
+				p = writeNumber(input, p, length, data, i++);
+				p = skipToToken(input, p, length);
+				p = writeNumber(input, p, length, data, i++);
+				p = skipToToken(input, p, length);
+				p = writeNumber(input, p, length, data, i++);
+				data[i++] = 1.0;
+
+			} else {
+
+				// Skip unknown keyword tokens.
+				while(p < length && input.charCodeAt(p) > 32) {
+
+					++p;
+
+				}
+
+			}
 
 		}
 

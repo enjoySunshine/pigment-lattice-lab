@@ -8805,16 +8805,6 @@ export class VignetteEffect extends Effect {
 }
 
 /**
- * An enumeration of LUT worker operations.
- *
- * @type {Object}
- * @property {String} SCALE_UP - Tetrahedral upscale operation.
- */
-export enum LUTOperation {
-	SCALE_UP = "lut.scaleup"
-}
-
-/**
  * A tetrahedral upscaler that can be used to augment 3D LUTs.
  *
  * Based on an implementation by Garrett Johnson:
@@ -8957,11 +8947,24 @@ export class LookupTexture extends Data3DTexture {
 	/**
 	 * Scales this LUT up to a given target size using tetrahedral interpolation.
 	 *
+	 * The upscaling is performed synchronously and the result is wrapped in a promise for
+	 * backwards compatibility.
+	 *
 	 * @param {Number} size - The target sidelength.
-	 * @param {Boolean} [transferData=true] - Extra fast mode. Set to false to keep the original data intact.
-	 * @return {Promise<LookupTexture>} A promise that resolves with a new LUT upon completion.
+	 * @param {Boolean} [transferData=true] - Deprecated, kept for backwards compatibility.
+	 * @return {Promise<LookupTexture>} A promise that resolves with a new LUT.
 	 */
 	scaleUp(size: number, transferData?: boolean): Promise<LookupTexture>;
+	/**
+	 * Scales this LUT up to a given target size using tetrahedral interpolation.
+	 *
+	 * The expansion is done once on the current thread and the original texture is left
+	 * untouched, so the result can be swapped in atomically and reused for every frame.
+	 *
+	 * @param {Number} size - The target sidelength.
+	 * @return {LookupTexture} A new LUT with the requested sidelength.
+	 */
+	scaleUpSync(size: number): LookupTexture;
 	/**
 	 * Applies the given LUT to this one.
 	 *

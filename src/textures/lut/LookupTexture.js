@@ -12,9 +12,8 @@ import {
 	Vector3
 } from "three";
 
-import { LUTOperation } from "../../enums/LUTOperation.js";
 import { RawImageData } from "../RawImageData.js";
-import workerProgram from "../../../temp/lut/worker.txt";
+import { TetrahedralUpscaler } from "./TetrahedralUpscaler.js";
 
 const c = /* @__PURE__ */ new Color();
 
@@ -83,55 +82,60 @@ export class LookupTexture extends Data3DTexture {
 	/**
 	 * Scales this LUT up to a given target size using tetrahedral interpolation.
 	 *
+	 * The upscaling is performed synchronously and the result is wrapped in a promise for
+	 * backwards compatibility. Use {@link LookupTexture#scaleUpSync} to avoid the promise
+	 * allocation entirely.
+	 *
 	 * @param {Number} size - The target sidelength.
-	 * @param {Boolean} [transferData=true] - Extra fast mode. Set to false to keep the original data intact.
-	 * @return {Promise<LookupTexture>} A promise that resolves with a new LUT upon completion.
+	 * @param {Boolean} [transferData=true] - Deprecated, kept for backwards compatibility.
+	 * @return {Promise<LookupTexture>} A promise that resolves with a new LUT.
 	 */
 
 	scaleUp(size, transferData = true) {
 
-		const image = this.image;
-		let promise;
+		void transferData;
 
-		if(size <= image.width) {
+		if(size <= this.image.width) {
 
-			promise = Promise.reject(new Error("The target size must be greater than the current size"));
-
-		} else {
-
-			promise = new Promise((resolve, reject) => {
-
-				const workerURL = URL.createObjectURL(new Blob([workerProgram], {
-					type: "text/javascript"
-				}));
-
-				const worker = new Worker(workerURL);
-				worker.addEventListener("error", (event) => reject(event.error));
-				worker.addEventListener("message", (event) => {
-
-					const lut = new LookupTexture(event.data, size);
-					this.colorSpace = lut.colorSpace;
-					lut.type = this.type;
-					lut.name = this.name;
-
-					URL.revokeObjectURL(workerURL);
-					resolve(lut);
-
-				});
-
-				const transferList = transferData ? [image.data.buffer] : [];
-
-				worker.postMessage({
-					operation: LUTOperation.SCALE_UP,
-					data: image.data,
-					size
-				}, transferList);
-
-			});
+			return Promise.reject(new Error("The target size must be greater than the current size"));
 
 		}
 
-		return promise;
+		return Promise.resolve(this.scaleUpSync(size));
+
+	}
+
+	/**
+	 * Scales this LUT up to a given target size using tetrahedral interpolation.
+	 *
+	 * The expansion is done once on the current thread and the original texture is left
+	 * untouched, so the result can be swapped in atomically and reused for every frame.
+	 *
+	 * @param {Number} size - The target sidelength.
+	 * @return {LookupTexture} A new LUT with the requested sidelength.
+	 * @throws {Error} Fails if the target size is not greater than the current size.
+	 */
+
+	scaleUpSync(size) {
+
+		const image = this.image;
+
+		if(size <= image.width) {
+
+			throw new Error("The target size must be greater than the current size");
+
+		}
+
+		const data = TetrahedralUpscaler.expand(image.data, size);
+		const lut = new LookupTexture(data, size);
+
+		lut.type = this.type;
+		lut.name = this.name;
+		lut.colorSpace = this.colorSpace;
+		lut.domainMin.copy(this.domainMin);
+		lut.domainMax.copy(this.domainMax);
+
+		return lut;
 
 	}
 

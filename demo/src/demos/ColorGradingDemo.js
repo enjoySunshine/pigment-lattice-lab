@@ -409,9 +409,22 @@ export class ColorGradingDemo extends PostProcessingDemo {
 				const lut = original.isLookupTexture3D ? original :
 					LookupTexture3D.from(original);
 
+				// The expansion runs once when the LUT changes; the result is reused for
+				// every subsequent frame.
 				console.time("Tetrahedral Upscaling");
-				promise = lut.scaleUp(targetSize, false);
 				document.body.classList.add("progress");
+
+				try {
+
+					promise = Promise.resolve(lut.scaleUpSync(targetSize));
+
+				} catch(error) {
+
+					document.body.classList.remove("progress");
+					console.error(error);
+					return;
+
+				}
 
 			} else {
 

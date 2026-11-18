@@ -19,9 +19,10 @@ const banner = `/**
  */`;
 
 const workers = {
-	entryPoints: await Array.fromAsync(glob("./src/**/worker.js")),
+	entryPoints: await Array.fromAsync(glob("./src/textures/smaa/worker.js")),
 	outExtension: { ".js": ".txt" },
-	outdir: "./temp",
+	outdir: "./temp/smaa",
+	outbase: "./src/textures/smaa",
 	target: "es2019",
 	logLevel: "info",
 	format: "iife",
