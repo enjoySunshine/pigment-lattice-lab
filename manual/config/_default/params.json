@@ -1,0 +1,21 @@
+{
+	"author": "Raoul van Rüschen",
+	"paginate": 3,
+	"manualURL": "",
+	"sidebarMenus": [
+		"main",
+		"community",
+		"demos"
+	],
+	"footerIcons": [
+		{
+			"name": "dark-mode"
+		}, {
+			"name": "repository",
+			"url": ""
+		}, {
+			"name": "support",
+			"url": "https://www.patreon.com/vanruesc"
+		}
+	]
+}
